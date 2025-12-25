@@ -1,0 +1,12 @@
+#!/bin/bash
+CC="/usr/bin/cc"
+CFLAGS=""
+LDFLAGS=""
+SRC="./vm.c ./term.c"
+OUT="./vm"
+CFG=""
+
+CMD="$LDFLAGS $CC $CFLAGS $@ $CFG $SRC -o $OUT"
+
+echo $CMD 
+eval $CMD
