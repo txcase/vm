@@ -1,5 +1,6 @@
 #include <errno.h>
 #include <ctype.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <limits.h>
 #include <stdarg.h>
@@ -60,7 +61,8 @@ typedef struct
 static int     vm_init(context *ctx, const char *src);
 static void    vm(const char *src, context *ctx, int recursive);
 static void    prange(const char *txt, const size_t ln_from, const size_t ln_to, context *ctx);
-static void    status(UINT rows, const char *msg_format, ...);
+static size_t  seqhandle(const char *txt, const int ci);
+static void    status(const UINT rows, const char *msg_format, ...);
 static long    xstrtol(const char *str, int base);
 static char *  xstrcasestr(const char *haystack, const char *needle);
 static int     xstrncasecmp(const char *str1, const char *str2, const size_t n);
@@ -70,7 +72,6 @@ static UINT    lncount(const char *src);
 
 static struct termios old_term;
 
-/* you can also create a file and paste this into it and then open it */
 static const char *vm_usage =
 "vm - text viewer\n\
 usage: vm -[hHv] file\n\
@@ -258,7 +259,7 @@ dinput(context *ctx)
 }
 
 static void
-status(UINT rows, const char *msg_format, ...)
+status(const UINT rows, const char *msg_format, ...)
 {
   printf("\033[%d;1H", rows); 
   fputs("\033[2K", stdout); 
@@ -393,6 +394,26 @@ fview(const char *path)
   return buffer;
 }
 
+static size_t
+seqhandle(const char *txt, const int ci)
+{
+  int i;
+  i = ci;
+
+  if (txt[i] == 27 && txt[i+1] == '[')
+  {
+    i += 2;
+
+    while (txt[i] && (txt[i] < '@' || txt[i] > '~'))
+      i++;
+
+    if (txt[i])
+      i++;
+  }
+
+  return i;
+}
+
 static void
 prange(const char *txt, const size_t ln_from, const size_t ln_to, context *ctx)
 {
@@ -414,7 +435,9 @@ prange(const char *txt, const size_t ln_from, const size_t ln_to, context *ctx)
     wlen = strlen(pat);
   }
 
-  for (i = 0; txt[i]; i++)
+ i = 0;
+
+ while (txt[i]) 
   {
     if (line >= ln_to)
       break;
@@ -426,7 +449,7 @@ prange(const char *txt, const size_t ln_from, const size_t ln_to, context *ctx)
     {
       fprintf(stdout, "\033[1;44m%.*s\033[0m", (int)wlen, pat);
 
-      i += wlen - 1;
+      i += wlen;
 
       continue;
     }
@@ -434,12 +457,21 @@ prange(const char *txt, const size_t ln_from, const size_t ln_to, context *ctx)
     if (line >= ln_from && line < ln_to)
     {
       /* prevent the use of escape sequences */
-      if (txt[i] == '\e')
-        fputc('\\', stdout);
-      fputc(txt[i], stdout);
+      size_t old = i;
+      i = seqhandle(txt, i);
+
+      if (i == old)
+      {
+        fputc(txt[i], stdout);
+        i++;
+      }
+    }
+    else 
+    {
+      i++;
     }
 
-    if (txt[i] == '\n')
+    if (txt[i - 1] == '\n')
       line++;
   }
 }
