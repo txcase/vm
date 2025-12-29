@@ -447,7 +447,7 @@ prange(const char *txt, const size_t ln_from, const size_t ln_to, context *ctx)
       line < ln_to &&
       !xstrncasecmp(&txt[i], pat, wlen))
     {
-      fprintf(stdout, "\033[1;44m%.*s\033[0m", (int)wlen, pat);
+      fprintf(stdout, "\e[1;44m%.*s\e[0m", (int)wlen, &txt[i]);
 
       i += wlen;
 
@@ -456,7 +456,6 @@ prange(const char *txt, const size_t ln_from, const size_t ln_to, context *ctx)
 
     if (line >= ln_from && line < ln_to)
     {
-      /* prevent the use of escape sequences */
       size_t old = i;
       i = seqhandle(txt, i);
 
@@ -553,6 +552,7 @@ vm(const char *src, context *ctx, int recursive)
       case 'j':
         if (ctx->y + ctx->cwsize.ws_row < ctx->last)
           ctx->y++;
+
         break;
 
       /* go to first line */
