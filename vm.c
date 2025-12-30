@@ -67,6 +67,7 @@ static long    xstrtol(const char *str, int base);
 static char *  xstrcasestr(const char *haystack, const char *needle);
 static int     xstrncasecmp(const char *str1, const char *str2, const size_t n);
 static char *  input(context *ctx, const char *prompt);
+static long    dinput(context *ctx, const int base);
 static char *  fview(const char *path);
 static UINT    lncount(const char *src);
 
