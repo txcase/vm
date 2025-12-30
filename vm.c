@@ -7,15 +7,14 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <getopt.h>
+#include <limits.h>
 #include <string.h>
 #include <unistd.h>
 #include <strings.h>
 #include <termios.h>
-#include <sys/wait.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
 #include <sys/types.h>
-#include <linux/limits.h>
 
 #include "term.h"
 
@@ -23,6 +22,7 @@
 
 #define UCHAR          unsigned char
 #define UINT           unsigned int
+#define WINSIZE        struct winsize
 
 #define DEVTTY         "/dev/tty"
 #define CHUNK          50
@@ -48,7 +48,7 @@ typedef struct
 
 typedef struct 
 {
-  struct winsize   cwsize;    /* current winsize */ 
+  WINSIZE          ws;        /* current winsize */ 
   SEARCH           search;    /* for search */
   FILE *           tty;
   const char *     filename;
@@ -91,6 +91,17 @@ h     help message\n\
   n     next\n\
 t     to N line\n\
 ";
+
+static int
+getstat(const char *filepath)
+{
+  struct stat st = {0};
+
+  if (stat(filepath, &st) == -1)
+    return -1;
+
+  return st.st_mode;
+}
 
 static int
 getwsz(struct winsize *wsz)
@@ -181,7 +192,7 @@ input(context *ctx, const char *prompt)
       return NULL;
   }
 
-  mvcurs(ctx->cwsize.ws_row, 1);
+  mvcurs(ctx->ws.ws_row, 1);
 
   fputs("\033[2K", stdout); 
   fputs(prompt, stdout);
@@ -228,7 +239,7 @@ input(context *ctx, const char *prompt)
       fputc(c, stdout);
       xpos++;
     }
-    mvcurs(ctx->cwsize.ws_row, xpos + strlen(prompt) + 1);
+    mvcurs(ctx->ws.ws_row, xpos + strlen(prompt) + 1);
   }
 
   if (setterm(fileno(ctx->tty), &input_term) == -1)
@@ -281,7 +292,7 @@ calcpos(const context *ctx, const UINT line, const long offset)
   long    new_pos;
   UINT    bot;
 
-  bot = (ctx->last < ctx->cwsize.ws_row) ? 0 : ctx->last - ctx->cwsize.ws_row;
+  bot = (ctx->last < ctx->ws.ws_row) ? 0 : ctx->last - ctx->ws.ws_row;
 
   tag = (long) line;
 
@@ -306,7 +317,7 @@ search_next(context *ctx, const char *src)
   if (!ptr)
     return;
 
-  ctx->y = calcpos(ctx, ctx->last - lncount(ptr), -(ctx->cwsize.ws_row / 2));
+  ctx->y = calcpos(ctx, ctx->last - lncount(ptr), -(ctx->ws.ws_row / 2));
   ctx->search.pos = ptr + strlen(ctx->search.pattern);
   ctx->search.current++;
 }
@@ -513,7 +524,7 @@ vm(const char *src, context *ctx, int recursive)
   if (vm_init(ctx, src) != 0)
     return;
 
-  if (getwsz(&ctx->cwsize) == -1)
+  if (getwsz(&ctx->ws) == -1)
     return;
 
   while (ctx->run)
@@ -521,11 +532,11 @@ vm(const char *src, context *ctx, int recursive)
     fputs(ASCII_CLS, stdout); 
     fflush(stdout);
 
-    bot = (ctx->last < ctx->cwsize.ws_row) ? 0 : ctx->last - ctx->cwsize.ws_row;
+    bot = (ctx->last < ctx->ws.ws_row) ? 0 : ctx->last - ctx->ws.ws_row;
 
-    prange(src, ctx->y, ctx->y + ctx->cwsize.ws_row, ctx);
+    prange(src, ctx->y, ctx->y + ctx->ws.ws_row, ctx);
 
-    status(ctx->cwsize.ws_row, messages[STATUS_FMT],
+    status(ctx->ws.ws_row, messages[STATUS_FMT],
         ctx->filename,                       /* filename */
         ctx->y,                              /* current position */ 
         bot,                                 /* bottom */
@@ -550,7 +561,7 @@ vm(const char *src, context *ctx, int recursive)
         break;
 
       case 'j':
-        if (ctx->y + ctx->cwsize.ws_row < ctx->last)
+        if (ctx->y + ctx->ws.ws_row < ctx->last)
           ctx->y++;
 
         break;
@@ -562,8 +573,8 @@ vm(const char *src, context *ctx, int recursive)
 
       /* go to end */
       case 'G':
-        if (ctx->last > ctx->cwsize.ws_row)
-          ctx->y = ctx->last - ctx->cwsize.ws_row;
+        if (ctx->last > ctx->ws.ws_row)
+          ctx->y = ctx->last - ctx->ws.ws_row;
         else 
           ctx->y = 0;
         break;
@@ -585,12 +596,43 @@ vm(const char *src, context *ctx, int recursive)
 
           if (src == ctx->search.pos)
           {
-            status(ctx->cwsize.ws_row, messages[SNOT_FOUND], ctx->search.pattern);
+            status(ctx->ws.ws_row, messages[SNOT_FOUND], ctx->search.pattern);
             fgetc(ctx->tty);
           }
 
           break;
         }
+
+      case '!':
+      {
+        char *cmd = input(ctx, "!");
+
+        if (!cmd)
+          break;
+
+        char *buf = strdup(cmd);
+
+        if (!buf)
+        {
+          free(cmd);
+          break;
+        }
+
+        fputs(ASCII_CLS, stdout);
+        fflush(stdout);
+
+        fprintf(stdout, "\"%s\"\n", cmd);
+
+        system(cmd);
+
+        fprintf(stdout, "press any key\n");
+
+        free(buf);
+
+        fgetc(ctx->tty);
+
+        break;
+      }
 
       case 'n':
       {
@@ -602,18 +644,9 @@ vm(const char *src, context *ctx, int recursive)
 
         search_next(ctx, ctx->search.pos);
 
-        if (current == ctx->search.pos)
-        {
-          ctx->search.pos = src;
-          ctx->search.current = 0;
-          search_next(ctx, ctx->search.pos);
-        }
-
         break;
       }
 
-      
-      /* to x line */
       case 't':
         {
           int next;
@@ -626,13 +659,13 @@ vm(const char *src, context *ctx, int recursive)
             case 't':
              nline = dinput(ctx);
 
-              if ((size_t)nline + ctx->cwsize.ws_row <= ctx->last)
+              if ((size_t)nline + ctx->ws.ws_row <= ctx->last)
                 {
                   ctx->y = nline;
                 }
               else
                 {
-                  status(ctx->cwsize.ws_row, messages[INCORRECT_LINE]);
+                  status(ctx->ws.ws_row, messages[INCORRECT_LINE]);
                   fgetc(ctx->tty);
                 }
               break;
@@ -645,19 +678,19 @@ vm(const char *src, context *ctx, int recursive)
       case CTRL('d'):
       case ' ':
         ctx->c = 'D';
-        if ( ctx->y + (2 * ctx->cwsize.ws_row) < ctx->last )
-          ctx->y += ctx->cwsize.ws_row;
+        if ( ctx->y + (2 * ctx->ws.ws_row) < ctx->last )
+          ctx->y += ctx->ws.ws_row;
         else
-          ctx->y = ctx->last - ctx->cwsize.ws_row;
+          ctx->y = ctx->last - ctx->ws.ws_row;
         break;
       
       /* page up */
       case CTRL('u'):
 
         ctx->c = 'U';
-        if (ctx->y >= ctx->cwsize.ws_row)
+        if (ctx->y >= ctx->ws.ws_row)
         {
-          ctx->y -= ctx->cwsize.ws_row;
+          ctx->y -= ctx->ws.ws_row;
           break;
         }
 
@@ -713,9 +746,10 @@ vm(const char *src, context *ctx, int recursive)
 int
 main(int ac, char **av)
 {
-  int               c;
-  char              *file;
-  context           ctx;
+  int      c;
+  int      ftype;
+  char     *file;
+  context  ctx;
 
   memset(&ctx, 0, sizeof(ctx));
   memset(&old_term, 0, sizeof(old_term));
@@ -746,6 +780,21 @@ main(int ac, char **av)
     }
   else
     {
+       
+      ftype = getstat(av[optind]);
+
+      if (ftype == -1)
+      {
+        fprintf(stderr, "file \'%s\' is not available!\n", av[optind]);
+        return -1;
+      }
+
+      if (S_ISDIR(ftype))
+      {
+        fprintf(stderr,"\'%s\' is a directory!\n", av[optind]);
+        return -1;
+      }
+
       file = fview(av[optind]);
       ctx.filename = av[optind];
     }
