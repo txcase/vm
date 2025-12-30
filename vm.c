@@ -253,7 +253,7 @@ input(context *ctx, const char *prompt)
 }
 
 static long int 
-dinput(context *ctx)
+dinput(context *ctx, const int base)
 {
   long int   n;
   char      *str;
@@ -263,7 +263,7 @@ dinput(context *ctx)
   if (!str)
     return 0;
 
-  n = xstrtol(str, DECIMICAL);
+  n = xstrtol(str, base);
   free(str);
 
   return n;
@@ -657,7 +657,7 @@ vm(const char *src, context *ctx, int recursive)
           
           {
             case 't':
-             nline = dinput(ctx);
+             nline = dinput(ctx, DECIMICAL);
 
               if ((size_t)nline + ctx->ws.ws_row <= ctx->last)
                 {
